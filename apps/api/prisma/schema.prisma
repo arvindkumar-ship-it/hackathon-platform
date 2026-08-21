@@ -1,0 +1,659 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PARTICIPANT
+  JUDGE
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum EventStatus {
+  DRAFT
+  REGISTRATION_OPEN
+  SUBMISSION_OPEN
+  JUDGING
+  LEADERBOARD_FROZEN
+  WINNERS_REVEALED
+  COMPLETED
+  ARCHIVED
+}
+
+enum EventMemberStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum TeamMemberRole {
+  LEADER
+  MEMBER
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  LOCKED
+  DISQUALIFIED
+  FINALIST
+  WINNER
+}
+
+enum AssetType {
+  PROFILE_PHOTO
+  SUBMISSION_PDF
+  SUBMISSION_PPTX
+  SCREENSHOT
+  CERTIFICATE
+  WINNER_POSTER
+  SIGNATURE
+}
+
+enum AssetStatus {
+  PENDING
+  SCANNING
+  SAFE
+  REJECTED
+  DELETED
+}
+
+enum JudgeAssignmentStatus {
+  ACTIVE
+  REMOVED
+}
+
+enum ScoreStatus {
+  DRAFT
+  SUBMITTED
+  LOCKED
+  VOIDED
+}
+
+enum CertificateStatus {
+  ISSUED
+  REVOKED
+  REPLACED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  SUBMIT
+  LOCK
+  UNLOCK
+  SCORE_SUBMITTED
+  SCORE_LOCKED
+  ADMIN_OVERRIDE
+  REVEAL_STARTED
+  REVEAL_COMPLETED
+  CERTIFICATE_ISSUED
+  CERTIFICATE_REVOKED
+  FILE_UPLOADED
+  FILE_REJECTED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+// === NAYE MASTER SPEC ENUMS ===
+enum RubricStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  REVOKED
+}
+
+enum EvaluationStatus {
+  DRAFT
+  SUBMITTED
+  INVALIDATED
+}
+
+enum LeaderboardStatus {
+  DRAFT
+  FROZEN
+  PUBLISHED
+}
+
+// === PHASE 8 ENUMS ===
+enum AuditSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
+enum AuditOutcome {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+
+model User {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  email                  String                  @unique @db.VarChar(320)
+  passwordHash           String
+  role                   Role                    @default(PARTICIPANT)
+  avatarUrl              String?
+  isActive               Boolean                 @default(true)
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  notifications          Notification[]
+  notificationPreference NotificationPreference?
+
+  refreshTokens          RefreshToken[]
+  eventMembers           EventMember[]
+  teamMembers            TeamMember[]
+  submissions            Submission[]     @relation("SubmissionCreatedBy")
+  scores                 Score[]
+  auditLogs              AuditLog[]       @relation("AuditActor")
+  announcements          Announcement[]   @relation("AnnouncementAuthor")
+  certificates           Certificate[]
+  teamInvitationsCreated TeamInvitation[] @relation("TeamInvitationCreator")
+
+  // === NAYE MASTER SPEC RELATIONS ===
+  rubricsCreated                Rubric[]              @relation("RubricCreator")
+  judgeAssignments              JudgeAssignment[]     @relation("JudgeAssignments")
+  assignmentsCreated            JudgeAssignment[]     @relation("AssignmentCreator")
+  judgeEvaluations              Evaluation[]          @relation("JudgeEvaluations")
+  leaderboardSnapshotsGenerated LeaderboardSnapshot[] @relation("LeaderboardGenerator")
+
+  @@index([role])
+  @@index([isActive])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  userAgent String?
+  ipAddress String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Event {
+  id                   String      @id @default(uuid()) @db.Uuid
+  name                 String
+  slug                 String      @unique
+  description          String?
+  status               EventStatus @default(DRAFT)
+  maxTeamSize          Int         @default(4)
+  registrationDeadline DateTime?
+  submissionDeadline   DateTime?
+  judgingDeadline      DateTime?
+  leaderboardFrozen    Boolean     @default(false)
+  winnersRevealed      Boolean     @default(false)
+  finalistCount        Int         @default(10)
+  winnerCount          Int         @default(3)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  notifications Notification[]
+  eventMembers  EventMember[]
+  teams         Team[]
+  submissions   Submission[]
+  criteria      JudgingCriterion[]
+  certificates  Certificate[]
+  announcements Announcement[]
+  auditLogs     AuditLog[]
+
+  // === NAYE MASTER SPEC RELATIONS ===
+  rubric              Rubric?
+  assignments         JudgeAssignment[]
+  evaluations         Evaluation[]
+  leaderboardSnapshot LeaderboardSnapshot?
+
+  @@index([status])
+  @@index([registrationDeadline])
+  @@index([submissionDeadline])
+  @@index([judgingDeadline])
+}
+
+model EventMember {
+  id        String            @id @default(uuid()) @db.Uuid
+  eventId   String            @db.Uuid
+  userId    String            @db.Uuid
+  status    EventMemberStatus @default(ACTIVE)
+  createdAt DateTime          @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@index([userId])
+}
+
+model Team {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @db.Uuid
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event       Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  members     TeamMember[]
+  submission  Submission?
+  invitations TeamInvitation[]
+
+  @@unique([eventId, name])
+}
+
+model TeamMember {
+  id        String         @id @default(uuid()) @db.Uuid
+  teamId    String         @db.Uuid
+  userId    String         @db.Uuid
+  role      TeamMemberRole @default(MEMBER)
+  createdAt DateTime       @default(now())
+
+  team Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, userId])
+}
+
+model Submission {
+  id          String           @id @default(uuid()) @db.Uuid
+  eventId     String           @db.Uuid
+  teamId      String           @unique @db.Uuid
+  createdById String           @db.Uuid
+  title       String
+  description String
+  figmaUrl    String?
+  status      SubmissionStatus @default(DRAFT)
+  submittedAt DateTime?
+  lockedAt    DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  event     Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  team      Team              @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy User              @relation("SubmissionCreatedBy", fields: [createdById], references: [id])
+  assets    SubmissionAsset[]
+  scores    Score[]
+
+  // === NAYE MASTER SPEC RELATIONS ===
+  assignments        JudgeAssignment[]
+  evaluations        Evaluation[]
+  leaderboardEntries LeaderboardEntry[]
+
+  @@index([eventId])
+  @@index([status])
+}
+
+model SubmissionAsset {
+  id           String      @id @default(uuid()) @db.Uuid
+  submissionId String      @db.Uuid
+  assetType    AssetType
+  storageKey   String      @unique
+  originalName String
+  safeName     String
+  extension    String
+  mimeType     String
+  fileSize     Int
+  checksum     String?
+  status       AssetStatus @default(PENDING)
+  uploadedAt   DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@index([submissionId])
+  @@index([status])
+  @@index([assetType])
+}
+
+model JudgingCriterion {
+  id           String   @id @default(uuid()) @db.Uuid
+  eventId      String   @db.Uuid
+  name         String
+  description  String?
+  weight       Int
+  displayOrder Int
+  createdAt    DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+}
+
+model Score {
+  id           String      @id @default(uuid()) @db.Uuid
+  judgeId      String      @db.Uuid
+  submissionId String      @db.Uuid
+  total        Float
+  status       ScoreStatus @default(DRAFT)
+  feedback     String?
+  isLocked     Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  judge      User        @relation(fields: [judgeId], references: [id])
+  submission Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  items      ScoreItem[]
+
+  @@unique([judgeId, submissionId])
+  @@index([submissionId])
+}
+
+model ScoreItem {
+  id          String @id @default(uuid()) @db.Uuid
+  scoreId     String @db.Uuid
+  criterionId String @db.Uuid
+  value       Float
+
+  score Score @relation(fields: [scoreId], references: [id], onDelete: Cascade)
+
+  @@index([scoreId])
+}
+
+model Certificate {
+  id               String            @id @default(uuid()) @db.Uuid
+  eventId          String            @db.Uuid
+  userId           String            @db.Uuid
+  verificationCode String            @unique
+  status           CertificateStatus @default(ISSUED)
+  storageKey       String?
+  issuedAt         DateTime          @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@index([eventId])
+}
+
+model Announcement {
+  id        String   @id @default(uuid()) @db.Uuid
+  eventId   String   @db.Uuid
+  authorId  String   @db.Uuid
+  title     String
+  body      String
+  createdAt DateTime @default(now())
+
+  event  Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  author User  @relation("AnnouncementAuthor", fields: [authorId], references: [id])
+
+  @@index([eventId])
+}
+
+model Notification {
+  id                String              @id @default(uuid()) @db.Uuid
+  userId            String?             @db.Uuid
+  eventId           String?             @db.Uuid
+  type              NotificationType
+  channel           NotificationChannel
+  status            NotificationStatus  @default(PENDING)
+  recipient         String              @db.VarChar(320)
+  subject           String              @db.VarChar(255)
+  templateKey       String              @db.VarChar(100)
+  templateData      Json
+  idempotencyKey    String              @unique @db.VarChar(255)
+  providerMessageId String?             @db.VarChar(255)
+  attempts          Int                 @default(0)
+  lastError         String?             @db.VarChar(2000)
+  queuedAt          DateTime?
+  sentAt            DateTime?
+  failedAt          DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  event Event? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, type, createdAt])
+  @@index([eventId, type, createdAt])
+}
+
+model NotificationPreference {
+  id                  String   @id @default(uuid()) @db.Uuid
+  userId              String   @unique @db.Uuid
+  emailEnabled        Boolean  @default(true)
+  eventUpdatesEnabled Boolean  @default(true)
+  judgingEnabled      Boolean  @default(true)
+  marketingEnabled    Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// === PHASE 8 UPDATED AUDIT LOG ===
+model AuditLog {
+  id         String        @id @default(uuid()) @db.Uuid
+  eventType  String        @db.VarChar(100)
+  severity   AuditSeverity @default(INFO)
+  outcome    AuditOutcome
+  actorId    String?       @db.Uuid
+  targetType String?       @db.VarChar(80)
+  targetId   String?       @db.VarChar(120)
+  eventId    String?       @db.Uuid
+  requestId  String?       @db.VarChar(120)
+  ipAddress  String?       @db.VarChar(80)
+  userAgent  String?       @db.VarChar(500)
+  metadata   Json?
+  createdAt  DateTime      @default(now())
+
+  actor User?  @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  event Event? @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([eventType, createdAt])
+  @@index([actorId, createdAt])
+  @@index([eventId, createdAt])
+  @@index([outcome, createdAt])
+  @@index([severity, createdAt])
+}
+
+model TeamInvitation {
+  id           String           @id @default(uuid()) @db.Uuid
+  teamId       String           @db.Uuid
+  invitedEmail String           @db.VarChar(320)
+  tokenHash    String           @unique
+  status       InvitationStatus @default(PENDING)
+  expiresAt    DateTime
+  acceptedAt   DateTime?
+  createdById  String           @db.Uuid
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  team      Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy User @relation("TeamInvitationCreator", fields: [createdById], references: [id])
+
+  @@index([teamId, status])
+  @@index([invitedEmail, status])
+  @@index([expiresAt])
+}
+
+// ==========================================
+// PHASE 6 & 7: STRICT MODELS
+// ==========================================
+
+model Rubric {
+  id          String       @id @default(uuid()) @db.Uuid
+  eventId     String       @unique @db.Uuid
+  name        String       @db.VarChar(180)
+  description String?      @db.Text
+  status      RubricStatus @default(DRAFT)
+  publishedAt DateTime?
+  createdById String       @db.Uuid
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  event       Event             @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  createdBy   User              @relation("RubricCreator", fields: [createdById], references: [id])
+  criteria    RubricCriterion[]
+  assignments JudgeAssignment[]
+
+  @@index([status])
+}
+
+model RubricCriterion {
+  id          String   @id @default(uuid()) @db.Uuid
+  rubricId    String   @db.Uuid
+  name        String   @db.VarChar(180)
+  description String?  @db.Text
+  maxScore    Decimal  @db.Decimal(6, 2)
+  weight      Decimal  @db.Decimal(6, 2)
+  sortOrder   Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rubric       Rubric            @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  scoreEntries EvaluationScore[]
+
+  @@unique([rubricId, name])
+  @@unique([rubricId, sortOrder])
+  @@index([rubricId, sortOrder])
+}
+
+model JudgeAssignment {
+  id           String           @id @default(uuid()) @db.Uuid
+  eventId      String           @db.Uuid
+  rubricId     String           @db.Uuid
+  judgeId      String           @db.Uuid
+  submissionId String           @db.Uuid
+  status       AssignmentStatus @default(ASSIGNED)
+  assignedById String           @db.Uuid
+  assignedAt   DateTime         @default(now())
+  completedAt  DateTime?
+
+  event      Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  rubric     Rubric      @relation(fields: [rubricId], references: [id], onDelete: Cascade)
+  judge      User        @relation("JudgeAssignments", fields: [judgeId], references: [id])
+  submission Submission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  assignedBy User        @relation("AssignmentCreator", fields: [assignedById], references: [id])
+  evaluation Evaluation?
+
+  @@unique([judgeId, submissionId])
+  @@index([eventId, judgeId, status])
+  @@index([submissionId])
+}
+
+model Evaluation {
+  id           String           @id @default(uuid()) @db.Uuid
+  assignmentId String           @unique @db.Uuid
+  judgeId      String           @db.Uuid
+  submissionId String           @db.Uuid
+  status       EvaluationStatus @default(DRAFT)
+  totalScore   Decimal          @default(0) @db.Decimal(10, 2)
+  overallNote  String?          @db.Text
+  submittedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  assignment JudgeAssignment   @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  judge      User              @relation("JudgeEvaluations", fields: [judgeId], references: [id])
+  submission Submission        @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  scores     EvaluationScore[]
+  event      Event?            @relation(fields: [eventId], references: [id])
+  eventId    String?           @db.Uuid
+
+  @@index([judgeId, status])
+  @@index([submissionId])
+}
+
+model EvaluationScore {
+  id           String   @id @default(uuid()) @db.Uuid
+  evaluationId String   @db.Uuid
+  criterionId  String   @db.Uuid
+  score        Decimal  @db.Decimal(8, 2)
+  note         String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  evaluation Evaluation      @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  criterion  RubricCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+
+  @@unique([evaluationId, criterionId])
+  @@index([criterionId])
+}
+
+model LeaderboardSnapshot {
+  id            String            @id @default(uuid()) @db.Uuid
+  eventId       String            @unique @db.Uuid
+  status        LeaderboardStatus @default(DRAFT)
+  generatedAt   DateTime
+  frozenAt      DateTime?
+  publishedAt   DateTime?
+  generatedById String            @db.Uuid
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  event       Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  generatedBy User               @relation("LeaderboardGenerator", fields: [generatedById], references: [id])
+  entries     LeaderboardEntry[]
+
+  @@index([status])
+}
+
+model LeaderboardEntry {
+  id              String    @id @default(uuid()) @db.Uuid
+  snapshotId      String    @db.Uuid
+  submissionId    String    @db.Uuid
+  rank            Int
+  averageScore    Decimal   @db.Decimal(10, 2)
+  innovationScore Decimal?  @db.Decimal(10, 2)
+  usabilityScore  Decimal?  @db.Decimal(10, 2)
+  submittedAt     DateTime?
+  isWinner        Boolean   @default(false)
+  isFinalist      Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+
+  snapshot   LeaderboardSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  submission Submission          @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, submissionId])
+  @@unique([snapshotId, rank])
+  @@index([snapshotId, rank])
+}
+
+enum NotificationChannel {
+  EMAIL
+}
+
+enum NotificationStatus {
+  PENDING
+  QUEUED
+  PROCESSING
+  SENT
+  FAILED
+  DEAD_LETTER
+  CANCELLED
+}
+
+enum NotificationType {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  TEAM_INVITATION
+  JUDGE_ASSIGNMENT
+  SUBMISSION_RECEIVED
+  EVALUATION_REMINDER
+  WINNER_ANNOUNCEMENT
+  EVENT_STATUS_CHANGED
+}
