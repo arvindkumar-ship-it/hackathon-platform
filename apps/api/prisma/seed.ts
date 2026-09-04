@@ -39,13 +39,15 @@ async function main() {
   });
 
   const event = await prisma.event.upsert({
-    where: { slug: 'designarena-development' },
-    update: {},
+    where: { slug: 'ui-verse-2026' },
+    update: {
+      status: 'SUBMISSION_OPEN',
+    },
     create: {
-      name: 'DesignArena Development Event',
-      slug: 'designarena-development',
-      description: 'Development-only event seed.',
-      status: 'DRAFT',
+      name: 'UI Verse 2026',
+      slug: 'ui-verse-2026',
+      description: 'UI Verse design hackathon.',
+      status: 'SUBMISSION_OPEN',
       maxTeamSize: 4,
     },
   });
