@@ -6,6 +6,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
+import { RegisterDto } from './dto/register.dto';
 import { AuthUser } from './types/auth-user.type';
 import { JwtPayload } from './types/jwt-payload.type';
 import * as argon2 from 'argon2';
@@ -22,25 +23,17 @@ export class AuthService {
 
   async login(
     dto: LoginDto,
-    metadata: {
-      ipAddress?: string;
-      userAgent?: string;
-    },
+    metadata: { ipAddress?: string; userAgent?: string },
   ) {
     const email = dto.email.trim().toLowerCase();
 
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const user = await this.prisma.user.findUnique({ where: { email } });
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Invalid email or password');
     }
 
-    const passwordMatches = await argon2.verify(
-      user.passwordHash,
-      dto.password,
-    );
+    const passwordMatches = await argon2.verify(user.passwordHash, dto.password);
 
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid email or password');
@@ -50,9 +43,82 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
+      phone: user.phone ?? undefined,
       role: user.role,
       isActive: user.isActive,
     };
+
+    const tokens = await this.issueTokenPair(authUser, metadata);
+
+    console.log(
+      `[LOGIN] user=${authUser.email} issued refreshToken hash=${this.hashToken(tokens.refreshToken).slice(0, 12)}...`,
+    );
+
+    return {
+      user: authUser,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+    };
+  }
+
+  async register(
+    dto: RegisterDto,
+    metadata: { ipAddress?: string; userAgent?: string },
+  ) {
+    const email = dto.email.trim().toLowerCase();
+
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+
+    if (existing) {
+      throw new ConflictException('An account with this email already exists');
+    }
+
+    const defaultEventSlug = this.config.get<string>('DEFAULT_EVENT_SLUG');
+
+    const event = defaultEventSlug
+      ? await this.prisma.event.findUnique({ where: { slug: defaultEventSlug } })
+      : null;
+
+    if (defaultEventSlug && !event) {
+      throw new ConflictException('Default event is not configured correctly');
+    }
+
+    const passwordHash = await this.hashPassword(dto.password);
+    const teamName = this.buildTeamName(dto.name);
+
+    const authUser = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          name: dto.name.trim(),
+          email,
+          phone: dto.phone?.trim(),
+          passwordHash,
+        },
+      });
+
+      if (event) {
+        await tx.eventMember.create({
+          data: { eventId: event.id, userId: user.id, status: 'ACTIVE' },
+        });
+
+        const team = await tx.team.create({
+          data: { eventId: event.id, name: teamName },
+        });
+
+        await tx.teamMember.create({
+          data: { teamId: team.id, userId: user.id, role: 'LEADER' },
+        });
+      }
+
+      return {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone ?? undefined,
+        role: user.role,
+        isActive: user.isActive,
+      } satisfies AuthUser;
+    });
 
     const tokens = await this.issueTokenPair(authUser, metadata);
 
@@ -63,17 +129,30 @@ export class AuthService {
     };
   }
 
-  // NOTE: this is the spec's "Important Refresh-Token Fix" version — revoke old
-  // token + issue new token pair inside a single Prisma transaction, to avoid a
-  // window where a token could be revoked without a replacement being persisted.
+  private buildTeamName(rawName: string): string {
+    const sanitized = rawName
+      .trim()
+      .replace(/[^a-zA-Z0-9 _-]/g, '')
+      .replace(/^[^a-zA-Z0-9]+/, '');
+
+    const base = sanitized.length >= 2 ? sanitized : 'Team';
+
+    return `${base} ${randomBytes(3).toString('hex')}`.slice(0, 100);
+  }
+
   async refresh(
     rawRefreshToken: string,
-    metadata: {
-      ipAddress?: string;
-      userAgent?: string;
-    },
+    metadata: { ipAddress?: string; userAgent?: string },
   ) {
+    // --- DEBUG LOGGING START ---
+    if (!rawRefreshToken) {
+      console.log('[REFRESH] FAILED: no refresh token cookie received by backend at all.');
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
     const tokenHash = this.hashToken(rawRefreshToken);
+    console.log(`[REFRESH] incoming cookie hash=${tokenHash.slice(0, 12)}... at ${new Date().toISOString()}`);
+    // --- DEBUG LOGGING END ---
 
     const storedToken = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
@@ -81,10 +160,18 @@ export class AuthService {
     });
 
     if (!storedToken) {
+      console.log('[REFRESH] FAILED: no matching refreshToken row in DB for this hash — token unknown/already deleted.');
       throw new UnauthorizedException('Invalid refresh token');
     }
 
+    console.log(
+      `[REFRESH] found row id=${storedToken.id} user=${storedToken.user.email} revokedAt=${storedToken.revokedAt} expiresAt=${storedToken.expiresAt.toISOString()} now=${new Date().toISOString()}`,
+    );
+
     if (storedToken.revokedAt || storedToken.expiresAt <= new Date()) {
+      console.log(
+        `[REFRESH] FAILED: token ${storedToken.revokedAt ? 'already revoked at ' + storedToken.revokedAt.toISOString() : 'expired'} — revoking all tokens for user ${storedToken.userId}.`,
+      );
       await this.revokeAllUserTokens(storedToken.userId);
       throw new UnauthorizedException('Refresh token expired or revoked');
     }
@@ -92,13 +179,17 @@ export class AuthService {
     const user = storedToken.user;
 
     if (!user.isActive) {
+      console.log(`[REFRESH] FAILED: user ${user.email} is inactive.`);
       throw new UnauthorizedException('User is inactive');
     }
+
+    console.log(`[REFRESH] SUCCESS for user=${user.email} — issuing new token pair.`);
 
     const authUser: AuthUser = {
       id: user.id,
       email: user.email,
       name: user.name,
+      phone: user.phone ?? undefined,
       role: user.role,
       isActive: user.isActive,
     };
@@ -131,36 +222,23 @@ export class AuthService {
         },
       });
 
-      return {
-        user: authUser,
-        accessToken,
-        refreshToken,
-      };
+      return { user: authUser, accessToken, refreshToken };
     });
   }
 
   async logout(rawRefreshToken?: string) {
-    if (!rawRefreshToken) {
-      return;
-    }
+    if (!rawRefreshToken) return;
 
     const tokenHash = this.hashToken(rawRefreshToken);
 
     await this.prisma.refreshToken.updateMany({
-      where: {
-        tokenHash,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
+      where: { tokenHash, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
   }
 
   async getUserById(id: string): Promise<AuthUser> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-    });
+    const user = await this.prisma.user.findUnique({ where: { id } });
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('User is inactive or unavailable');
@@ -170,6 +248,7 @@ export class AuthService {
       id: user.id,
       email: user.email,
       name: user.name,
+      phone: user.phone ?? undefined,
       role: user.role,
       isActive: user.isActive,
     };
@@ -184,15 +263,9 @@ export class AuthService {
     });
   }
 
-  // NOTE: per spec's "Important Controller Improvement", issueTokenPair also
-  // returns `user` so the controller never has to decode its own JWT to derive
-  // identity on the /auth/refresh response.
   private async issueTokenPair(
     user: AuthUser,
-    metadata: {
-      ipAddress?: string;
-      userAgent?: string;
-    },
+    metadata: { ipAddress?: string; userAgent?: string },
   ) {
     const payload: JwtPayload = {
       sub: user.id,
@@ -202,7 +275,6 @@ export class AuthService {
     };
 
     const accessToken = await this.jwt.signAsync(payload);
-
     const refreshToken = randomBytes(64).toString('base64url');
     const tokenHash = this.hashToken(refreshToken);
 
@@ -219,12 +291,7 @@ export class AuthService {
       },
     });
 
-    return {
-      accessToken,
-      refreshToken,
-      expiresAt,
-      user,
-    };
+    return { accessToken, refreshToken, expiresAt, user };
   }
 
   private hashToken(token: string): string {
@@ -233,33 +300,21 @@ export class AuthService {
 
   private calculateExpiry(ttl: string): Date {
     const match = ttl.match(/^(\d+)([smhd])$/);
-
     if (!match) {
       throw new ConflictException('Invalid JWT_REFRESH_TTL configuration');
     }
-
     const amount = Number(match[1]);
     const unit = match[2];
-
     const multipliers: Record<string, number> = {
-      s: 1000,
-      m: 60 * 1000,
-      h: 60 * 60 * 1000,
-      d: 24 * 60 * 60 * 1000,
+      s: 1000, m: 60 * 1000, h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000,
     };
-
     return new Date(Date.now() + amount * multipliers[unit]);
   }
 
   private async revokeAllUserTokens(userId: string) {
     await this.prisma.refreshToken.updateMany({
-      where: {
-        userId,
-        revokedAt: null,
-      },
-      data: {
-        revokedAt: new Date(),
-      },
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
     });
   }
 }
