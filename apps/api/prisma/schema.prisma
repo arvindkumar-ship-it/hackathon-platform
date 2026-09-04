@@ -162,6 +162,7 @@ model User {
   notificationPreference NotificationPreference?
 
   refreshTokens          RefreshToken[]
+  passwordResetTokens    PasswordResetToken[]
   eventMembers           EventMember[]
   teamMembers            TeamMember[]
   submissions            Submission[]     @relation("SubmissionCreatedBy")
@@ -191,6 +192,22 @@ model RefreshToken {
   createdAt DateTime  @default(now())
   userAgent String?
   ipAddress String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  ipAddress String?
+  userAgent String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
