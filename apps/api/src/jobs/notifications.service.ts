@@ -71,7 +71,7 @@ export class NotificationsService {
         notificationId: notification.id,
       },
       {
-        jobId: `notification:${notification.id}`,
+        jobId: `notification-${notification.id}`,
         attempts: 5,
         backoff: {
           type: 'exponential',
