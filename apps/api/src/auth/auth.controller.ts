@@ -11,7 +11,6 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { Role } from '@prisma/client';
 import { Throttle } from '@nestjs/throttler';
-import { createHash } from 'crypto';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -131,14 +130,7 @@ export class AuthController {
 
   private getRefreshToken(request: Request) {
     const cookies = request.cookies as Record<string, string> | undefined;
-    const token = cookies?.[this.cookieName()];
-
-    // --- DEBUG LOGGING ---
-    console.log(
-      `[COOKIE-READ] raw Cookie header="${request.headers.cookie ?? '(none)'}" | parsed value present=${!!token}`,
-    );
-
-    return token;
+    return cookies?.[this.cookieName()];
   }
 
   private setRefreshCookie(response: Response, token: string) {
@@ -153,12 +145,6 @@ export class AuthController {
       ...this.cookieOptions(),
       maxAge: this.parseCookieMaxAge(),
     });
-
-    // --- DEBUG LOGGING ---
-    const hash = createHash('sha256').update(token).digest('hex');
-    console.log(
-      `[COOKIE-SET] name=${this.cookieName()} path=${this.cookieOptions().path} newTokenHash=${hash.slice(0, 12)}...`,
-    );
   }
 
   private clearAllCookieVariants(response: Response) {

@@ -50,10 +50,6 @@ export class AuthService {
 
     const tokens = await this.issueTokenPair(authUser, metadata);
 
-    console.log(
-      `[LOGIN] user=${authUser.email} issued refreshToken hash=${this.hashToken(tokens.refreshToken).slice(0, 12)}...`,
-    );
-
     return {
       user: authUser,
       accessToken: tokens.accessToken,
@@ -144,15 +140,11 @@ export class AuthService {
     rawRefreshToken: string,
     metadata: { ipAddress?: string; userAgent?: string },
   ) {
-    // --- DEBUG LOGGING START ---
     if (!rawRefreshToken) {
-      console.log('[REFRESH] FAILED: no refresh token cookie received by backend at all.');
       throw new UnauthorizedException('Invalid refresh token');
     }
 
     const tokenHash = this.hashToken(rawRefreshToken);
-    console.log(`[REFRESH] incoming cookie hash=${tokenHash.slice(0, 12)}... at ${new Date().toISOString()}`);
-    // --- DEBUG LOGGING END ---
 
     const storedToken = await this.prisma.refreshToken.findUnique({
       where: { tokenHash },
@@ -160,18 +152,10 @@ export class AuthService {
     });
 
     if (!storedToken) {
-      console.log('[REFRESH] FAILED: no matching refreshToken row in DB for this hash — token unknown/already deleted.');
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    console.log(
-      `[REFRESH] found row id=${storedToken.id} user=${storedToken.user.email} revokedAt=${storedToken.revokedAt} expiresAt=${storedToken.expiresAt.toISOString()} now=${new Date().toISOString()}`,
-    );
-
     if (storedToken.revokedAt || storedToken.expiresAt <= new Date()) {
-      console.log(
-        `[REFRESH] FAILED: token ${storedToken.revokedAt ? 'already revoked at ' + storedToken.revokedAt.toISOString() : 'expired'} — revoking all tokens for user ${storedToken.userId}.`,
-      );
       await this.revokeAllUserTokens(storedToken.userId);
       throw new UnauthorizedException('Refresh token expired or revoked');
     }
@@ -179,11 +163,8 @@ export class AuthService {
     const user = storedToken.user;
 
     if (!user.isActive) {
-      console.log(`[REFRESH] FAILED: user ${user.email} is inactive.`);
       throw new UnauthorizedException('User is inactive');
     }
-
-    console.log(`[REFRESH] SUCCESS for user=${user.email} — issuing new token pair.`);
 
     const authUser: AuthUser = {
       id: user.id,
