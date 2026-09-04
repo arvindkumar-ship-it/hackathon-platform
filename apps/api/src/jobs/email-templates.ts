@@ -88,6 +88,32 @@ export function renderTemplate(
       ].join('\n'),
     };
   }
+  if (templateKey === 'PASSWORD_RESET') {
+    const resetUrl = String(data.resetUrl ?? '');
+    const expiresInMinutes = String(data.expiresInMinutes ?? '30');
+
+    return {
+      subject: 'Reset your password',
+      html: `
+        <main>
+          <h1>Reset your password</h1>
+          <p>We received a request to reset your password. This link expires in ${escapeHtml(expiresInMinutes)} minutes.</p>
+          <p>
+            <a href="${escapeHtml(resetUrl)}">
+              Reset password
+            </a>
+          </p>
+          <p>If you didn't request this, you can safely ignore this email.</p>
+        </main>
+      `,
+      text: [
+        'Reset your password',
+        `This link expires in ${expiresInMinutes} minutes.`,
+        `Reset password: ${resetUrl}`,
+        "If you didn't request this, you can safely ignore this email.",
+      ].join('\n'),
+    };
+  }
 
   if (templateKey === 'WINNER_ANNOUNCEMENT') {
     const eventName = escapeHtml(String(data.eventName ?? 'the event'));
