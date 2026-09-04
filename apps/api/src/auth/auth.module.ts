@@ -7,10 +7,12 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { JobsModule } from '../jobs/jobs.module';
 
 @Module({
   imports: [
     ConfigModule,
+    JobsModule,
     PassportModule.register({
       defaultStrategy: 'jwt',
     }),

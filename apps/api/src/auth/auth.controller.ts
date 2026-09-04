@@ -17,6 +17,8 @@ import { CurrentUser } from './decorators/current-user.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import type { AuthUser } from './types/auth-user.type';
@@ -107,6 +109,24 @@ export class AuthController {
     return {
       success: true,
     };
+  }
+
+  @Post('forgot-password')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  forgotPassword(
+    @Body() dto: ForgotPasswordDto,
+    @Req() request: Request,
+  ) {
+    return this.authService.forgotPassword(dto, {
+      ipAddress: request.ip,
+      userAgent: request.headers['user-agent'],
+    });
+  }
+
+  @Post('reset-password')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 
   @Get('me')

@@ -7,11 +7,15 @@ import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthUser } from './types/auth-user.type';
 import { JwtPayload } from './types/jwt-payload.type';
 import * as argon2 from 'argon2';
 import { randomBytes, createHash } from 'crypto';
 import { JwtService } from '@nestjs/jwt';
+import { NotificationsService } from '../jobs/notifications.service';
+import { NotificationType } from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -19,6 +23,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly jwt: JwtService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async login(
@@ -123,6 +128,87 @@ export class AuthService {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
     };
+  }
+  async forgotPassword(
+    dto: ForgotPasswordDto,
+    metadata: { ipAddress?: string; userAgent?: string },
+  ) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    const genericResponse = {
+      message: 'If an account exists for this email, a reset link has been sent.',
+    };
+
+    // Don't reveal whether the email is registered — same response either way.
+    if (!user || !user.isActive) {
+      return genericResponse;
+    }
+
+    const rawToken = randomBytes(32).toString('base64url');
+    const tokenHash = this.hashToken(rawToken);
+    const ttlMinutes = this.config.get<number>('PASSWORD_RESET_TTL_MINUTES', 30);
+    const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt,
+        ipAddress: metadata.ipAddress,
+        userAgent: metadata.userAgent,
+      },
+    });
+
+    const webUrl = this.config.get<string>('WEB_URL', 'http://localhost:3000');
+    const resetUrl = `${webUrl}/reset-password?token=${rawToken}`;
+
+    await this.notifications.createAndQueue({
+      userId: user.id,
+      type: NotificationType.PASSWORD_RESET,
+      recipient: user.email,
+      subject: 'Reset your password',
+      templateKey: 'PASSWORD_RESET',
+      templateData: { resetUrl, expiresInMinutes: ttlMinutes },
+      idempotencyKey: `password-reset:${tokenHash}`,
+    });
+
+    return genericResponse;
+  }
+
+  async resetPassword(dto: ResetPasswordDto) {
+    const tokenHash = this.hashToken(dto.token);
+
+    const storedToken = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash },
+    });
+
+    if (
+      !storedToken ||
+      storedToken.usedAt ||
+      storedToken.expiresAt <= new Date()
+    ) {
+      throw new UnauthorizedException('Invalid or expired reset link');
+    }
+
+    const passwordHash = await this.hashPassword(dto.newPassword);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: storedToken.userId },
+        data: { passwordHash },
+      }),
+      this.prisma.passwordResetToken.update({
+        where: { id: storedToken.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    // A reset means the user lost access to their session too — sign out
+    // every device holding an old refresh token.
+    await this.revokeAllUserTokens(storedToken.userId);
+
+    return { message: 'Password has been reset. Please log in with your new password.' };
   }
 
   private buildTeamName(rawName: string): string {
