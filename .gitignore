@@ -29,4 +29,5 @@ apps/api/.env
 apps/api/.agents/
 apps/api/.claude/
 apps/api/.windsurf/
-apps/api/skills-lock.json
+apps/api/skills-lock.jsoncheck_event.sql
+check_submission.sql
