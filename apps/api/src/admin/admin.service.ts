@@ -120,6 +120,38 @@ export class AdminService {
               judgeAssignments: true,
             },
           },
+          // Submission belongs to Team, not User directly — a user only
+          // sees a submission via the team(s) they're a member of. A user
+          // is expected to be on at most one team per event on this
+          // platform, so we take the first team (if any) that actually
+          // has a submission.
+          teamMembers: {
+            select: {
+              team: {
+                select: {
+                  submission: {
+                    select: {
+                      id: true,
+                      status: true,
+                      title: true,
+                      assets: {
+                        // Only SAFE assets are ever rendered by the
+                        // catalogue UI — filtering here keeps the
+                        // payload small and matches the frontend's own
+                        // `status === 'SAFE'` check.
+                        where: { status: AssetStatus.SAFE },
+                        select: {
+                          id: true,
+                          assetType: true,
+                          status: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
         orderBy: {
           createdAt: 'desc',
@@ -130,8 +162,19 @@ export class AdminService {
       this.prisma.user.count({ where }),
     ]);
 
+    const mappedItems = items.map(({ teamMembers, ...user }) => {
+      const submission =
+        teamMembers.map((tm) => tm.team.submission).find((s) => s != null) ??
+        null;
+
+      return {
+        ...user,
+        submission,
+      };
+    });
+
     return {
-      items,
+      items: mappedItems,
       pagination: {
         page: dto.page,
         pageSize: dto.pageSize,
