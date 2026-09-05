@@ -12,6 +12,7 @@ import {
   SubmissionStatus,
   AssignmentStatus,
   NotificationStatus,
+  AssetStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
