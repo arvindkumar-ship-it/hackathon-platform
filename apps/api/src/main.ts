@@ -13,6 +13,8 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const configService = app.get(ConfigService);
+  const trustProxyHops = configService.get<number>('TRUST_PROXY_HOPS', 1);
+  app.getHttpAdapter().getInstance().set('trust proxy', trustProxyHops);
 
   const prefix = configService.get<string>('API_PREFIX', 'api/v1');
   const webUrl = configService.get<string>('WEB_URL', 'http://localhost:3000');
