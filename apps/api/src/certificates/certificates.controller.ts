@@ -20,6 +20,22 @@ export class CertificatesController {
     return this.certificatesService.listForUser(user.id);
   }
 
+  // Same design, rendered inline for the catalogue preview (e.g. an <iframe>/<embed>)
+  // instead of triggering a browser download.
+  @Get(':id/preview')
+  async preview(
+    @Param('id', UuidParamPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    const { buffer, filename } = await this.certificatesService.generatePreview(id, user.id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="${filename}"`,
+    });
+    res.send(buffer);
+  }
+
   @Get(':id/download')
   async download(
     @Param('id', UuidParamPipe) id: string,
