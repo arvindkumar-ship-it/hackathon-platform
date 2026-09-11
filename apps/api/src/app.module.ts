@@ -7,6 +7,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { AdminModule } from './admin/admin.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { CertificatesModule } from './certificates/certificates.module';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
 import { InvitationsModule } from './invitations/invitations.module';
@@ -36,6 +37,7 @@ import { MetricsModule } from './metrics/metrics.module';
     TeamsModule,
     InvitationsModule,
     SubmissionsModule,
+    CertificatesModule,
     JudgingModule,
     LeaderboardModule,
     AuditModule,
