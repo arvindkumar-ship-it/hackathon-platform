@@ -1,8 +1,20 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { join } from 'path';
 import { SubmissionStatus } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../prisma/prisma.service';
+
+// Fixed UI Verse certificate template. Exact pixel size of the source image —
+// keep the PDF page the same size so the background is drawn 1:1, no scaling artifacts.
+const TEMPLATE_PATH = join(process.cwd(), 'assets', 'certificates', 'uiverse-template.png');
+const TEMPLATE_WIDTH = 983;
+const TEMPLATE_HEIGHT = 696;
+
+// Where the recipient's name sits, centered on the blank line under
+// "PROUDLY PRESENTED TO". Tweak NAME_Y after checking /certificates/:id/preview.
+const NAME_Y = 330;
+const NAME_FONT_SIZE = 26;
 
 const ELIGIBLE_STATUSES: SubmissionStatus[] = [
   SubmissionStatus.SUBMITTED,
@@ -58,7 +70,7 @@ export class CertificatesService {
     }));
   }
 
-  async generatePdf(certificateId: string, userId: string) {
+  private async findOwnCertificate(certificateId: string, userId: string) {
     const certificate = await this.prisma.certificate.findUnique({
       where: { id: certificateId },
       include: { event: { select: { name: true, slug: true } }, user: { select: { name: true } } },
@@ -67,39 +79,50 @@ export class CertificatesService {
     if (!certificate) throw new NotFoundException('Certificate not found');
     if (certificate.userId !== userId) throw new ForbiddenException('Not your certificate');
 
-    const doc = new PDFDocument({ layout: 'landscape', size: 'A4' });
+    return certificate;
+  }
+
+  // Draws the fixed UI Verse template as a full-bleed background and overlays
+  // only the recipient's name — everything else in the design stays exactly
+  // as-is, so preview and the downloaded PDF are always pixel-identical.
+  private buildPdfBuffer(recipientName: string): Promise<Buffer> {
+    const doc = new PDFDocument({
+      size: [TEMPLATE_WIDTH, TEMPLATE_HEIGHT],
+      margin: 0,
+    });
     const chunks: Buffer[] = [];
     doc.on('data', (chunk) => chunks.push(chunk));
 
+    doc.image(TEMPLATE_PATH, 0, 0, {
+      width: TEMPLATE_WIDTH,
+      height: TEMPLATE_HEIGHT,
+    });
+
     doc
-      .fontSize(28)
-      .text('Certificate of Participation', { align: 'center' })
-      .moveDown(2)
-      .fontSize(16)
-      .text(`Awarded to`, { align: 'center' })
-      .moveDown(0.5)
-      .fontSize(22)
-      .text(certificate.user.name, { align: 'center' })
-      .moveDown(1)
-      .fontSize(16)
-      .text(`for participation in`, { align: 'center' })
-      .moveDown(0.5)
-      .fontSize(20)
-      .text(certificate.event.name, { align: 'center' })
-      .moveDown(2)
-      .fontSize(10)
-      .text(`Verification code: ${certificate.verificationCode}`, { align: 'center' })
-      .text(`Issued: ${certificate.issuedAt.toDateString()}`, { align: 'center' });
+      .font('Times-Bold')
+      .fontSize(NAME_FONT_SIZE)
+      .fillColor('#1e293b')
+      .text(recipientName, 0, NAME_Y, {
+        width: TEMPLATE_WIDTH,
+        align: 'center',
+      });
 
     doc.end();
 
-    return new Promise<{ buffer: Buffer; filename: string }>((resolve) => {
-      doc.on('end', () => {
-        resolve({
-          buffer: Buffer.concat(chunks),
-          filename: `${certificate.event.slug}-certificate.pdf`,
-        });
-      });
+    return new Promise<Buffer>((resolve) => {
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
     });
+  }
+
+  async generatePdf(certificateId: string, userId: string) {
+    const certificate = await this.findOwnCertificate(certificateId, userId);
+    const buffer = await this.buildPdfBuffer(certificate.user.name);
+    return { buffer, filename: `${certificate.event.slug}-certificate.pdf` };
+  }
+
+  async generatePreview(certificateId: string, userId: string) {
+    const certificate = await this.findOwnCertificate(certificateId, userId);
+    const buffer = await this.buildPdfBuffer(certificate.user.name);
+    return { buffer, filename: `${certificate.event.slug}-certificate-preview.pdf` };
   }
 }
