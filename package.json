@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.14.0",
   "scripts": {
-    "dev": "pnpm --parallel --filter @hackathon/api --filter @hackathon/web dev",
+    "dev": "pnpm --filter @hackathon/api dev",
     "build": "pnpm --recursive build",
     "lint": "pnpm --recursive lint",
     "typecheck": "pnpm --recursive typecheck",
