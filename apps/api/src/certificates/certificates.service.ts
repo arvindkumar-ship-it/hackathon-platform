@@ -140,13 +140,13 @@ import { SubmissionStatus } from '@prisma/client';
 import PDFDocument from 'pdfkit';
 import { PrismaService } from '../prisma/prisma.service';
 
-const TEMPLATE_PATH = join(process.cwd(), 'assets', 'certificates', 'uiverse-template.png');
+const TEMPLATE_PATH = join(__dirname, '..', '..', 'assets', 'certificates', 'uiverse-template.png');
 const TEMPLATE_WIDTH = 983;
 const TEMPLATE_HEIGHT = 696;
 
 // Custom script font — must be registered with pdfkit before use,
 // since it isn't one of the 14 built-in PDF fonts.
-const NAME_FONT_PATH = join(process.cwd(), 'assets', 'fonts', 'AlexBrush-Regular.ttf');
+const NAME_FONT_PATH = join(__dirname, '..', '..', 'assets', 'fonts', 'AlexBrush-Regular.ttf');
 const NAME_FONT_NAME = 'AlexBrush';
 
 const NAME_Y = 345;
