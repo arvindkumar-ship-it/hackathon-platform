@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../jobs/notifications.service';
 
 jest.mock('argon2');
 
@@ -48,6 +49,7 @@ describe('AuthService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         AuthService,
+        { provide: NotificationsService, useValue: { createAndQueue: jest.fn() } },
         { provide: PrismaService, useValue: prisma },
         { provide: JwtService, useValue: jwt },
         {

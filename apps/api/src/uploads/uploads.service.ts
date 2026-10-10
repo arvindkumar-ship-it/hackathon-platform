@@ -468,18 +468,8 @@ export class UploadsService {
       { requireLeader: true },
     );
 
-    // DEV/TESTING RELAXATION: originally this required
-    // `submission.status === DRAFT`, which permanently blocked re-uploading
-    // once a submission had been SUBMITTED once — made repeated manual
-    // testing impossible without creating a new user every time. Loosened
-    // to only block genuinely LOCKED submissions. Revisit before any real
-    // event goes live — a real participant probably shouldn't be able to
-    // silently swap files on an already-SUBMITTED entry without at least
-    // reopening it explicitly.
-    if (submission.status === SubmissionStatus.LOCKED) {
-      throw new ForbiddenException(
-        'Assets cannot be changed after submission lock',
-      );
+    if (submission.status !== SubmissionStatus.DRAFT) {
+      throw new ForbiddenException('Assets can only be changed on a draft submission');
     }
 
     const policy = UPLOAD_POLICIES[assetType];
